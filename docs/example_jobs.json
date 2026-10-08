@@ -1,0 +1,9 @@
+{
+  "video": "YOUTUBE_VIDEO_ID",
+  "words": "/path/to/yt_words.json",
+  "out": "/path/to/output_dir",
+  "jobs": [
+    {"name": "clip_01_example", "ranges": [[120.4, 171.9]], "title": "Short context title"},
+    {"name": "clip_02_with_splice", "ranges": [[300.0, 318.2], [330.5, 352.0]], "title": "Two ranges, spliced forward only"}
+  ]
+}

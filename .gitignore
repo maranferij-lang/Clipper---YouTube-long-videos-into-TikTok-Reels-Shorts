@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.DS_Store
+*.mp4
+*.mov
+*.onnx
+*.model
+*.ttf
+.env
+w/
