@@ -1,30 +1,30 @@
 """
-render_opus_tc_v4.py  (19.09.2026)  рендер 9:16 «як Opus Clip» для Clipper.
-Історія версій: _tools/CHANGELOG.md. Це v3.5.11 без мертвого коду, з профілями і без змін у логіці кадру.
+render_opus_tc_v4.py  (19.09.2026)  9:16 render "like Opus Clip" for Clipper.
+Version history: _tools/CHANGELOG.md. This is v3.5.11 without dead code, with profiles and no change to the frame logic.
 
-ЯК ПРАЦЮЄ (коротко, щоб не читати код)
- 1. Плани джерела: різ = пік різниці кадрів; додатково межа там, де облич немає довше 1.2 с (слайд, графіка).
-    Усередині плану камера стоїть. Перемикання спікера лише на межі плану або в паузі (Light-ASD через --asd).
- 2. Режим на план:  слайд без облич -> WIDE (весь кадр 16:9 смугою на розмитому фоні) на всю довжину;
-    короткий загальний (1.2-4.5 с, обличчя < --band-wide) -> WIDE, але не впритул до склейки/краю кліпу;
-    довгий загальний -> SPEAKER (кроп на спікера); крупний -> SPEAKER кроп повної висоти.
- 3. Масштаб кропу один на план джерела: 10-й перцентиль висоти обличчя по плану, дозум так, щоб обличчя було
-    >= 17 % кропу, підлога 0.62 висоти кадру (апскейл <= 1.4x), стеля: найбільше обличчя плану <= 50 % кропу.
- 4. Власні різи: сегмент довший за --hold-max ріжеться в паузу/пунктуацію; якщо їх немає і сегмент > 1.5*hold-max,
-    між словами. Фінальна фраза (2-5 с) одним кадром. Сегменти < --min-seg зливаються в межах плану; огризок < 1 с
-    на краю кліпу чи біля склейки зливається навіть через різ джерела. Одна смуга-«видих» (--band 1) на найтихішому
-    широкому сегменті, не біля склейки.
- 5. Підписи: ВЕЛИКИМИ, Montserrat ExtraBold, до 3 слів у рядку, до 2 рядків, пігулка на активному слові,
-    блок на --sub-y; у паузі > 1 с підпис зникає через --cap-hold. Плашка вгорі лише з --title (покліпово).
- 6. Звук не чіпаємо: highpass/loudnorm робить pipeline у стадії final.
+HOW IT WORKS (short, so you do not have to read the code)
+ 1. Source shots: a cut = a peak in the frame difference; also a boundary where there are no faces for longer than 1.2 s (slide, graphic).
+    The camera stays still inside a shot. The speaker switches only at a shot boundary or in a pause (Light-ASD via --asd).
+ 2. Mode per shot:  slide without faces -> WIDE (the whole 16:9 frame as a band on a blurred background) for its full length;
+    short wide shot (1.2-4.5 s, face < --band-wide) -> WIDE, but not right next to a splice or the clip edge;
+    long wide shot -> SPEAKER (crop on the speaker); close-up -> SPEAKER full-height crop.
+ 3. One crop scale per source shot: 10th percentile of the face height over the shot, zoomed in so the face is
+    >= 17 % of the crop, floor 0.62 of the frame height (upscale <= 1.4x), ceiling: the largest face of the shot <= 50 % of the crop.
+ 4. Own cuts: a segment longer than --hold-max is cut at a pause/punctuation; if there are none and the segment is > 1.5*hold-max,
+    between words. The final phrase (2-5 s) is a single frame. Segments < --min-seg are merged within a shot; a stub < 1 s
+    at the clip edge or near a splice is merged even across a source cut. One "breath" band (--band 1) on the quietest
+    wide segment, not near a splice.
+ 5. Captions: UPPERCASE, Montserrat ExtraBold, up to 3 words per line, up to 2 lines, a pill on the active word,
+    block at --sub-y; in a pause > 1 s the caption disappears after --cap-hold. A title plate at the top only with --title (per clip).
+ 6. Audio is left untouched: highpass/loudnorm is done by the pipeline in the final stage.
 
-ПРОФІЛІ (--profile; параметр, заданий явно, має пріоритет над профілем)
-  podcast (дефолт): мультикамера, троє в кадрі. punch 1.0 (без підрізу), hold-max 9, band 1, short-shot 1.5,
-                    min-crop 1.0 (кроп повної висоти, апскейл лише у широкому плані за п. 3), hl yellow.
-  solo:             одна людина, камера не ріже. band 0, band-wide 0, switch-hold 60, min-dwell 60, face-frac 0.22,
-                    punch 0.76, різи лише на межах речень з кроком >= --punch-gap (9 с), hl #C82828.
+PROFILES (--profile; an explicitly given parameter takes priority over the profile)
+  podcast (default): multicamera, three people in frame. punch 1.0 (no punch-in), hold-max 9, band 1, short-shot 1.5,
+                    min-crop 1.0 (full-height crop, upscale only in a wide shot per item 3), hl yellow.
+  solo:             one person, the camera does not cut. band 0, band-wide 0, switch-hold 60, min-dwell 60, face-frac 0.22,
+                    punch 0.76, cuts only at sentence boundaries with a step >= --punch-gap (9 s), hl #C82828.
 
-ЗАПУСК (зазвичай через pipeline):
+RUN (usually via the pipeline):
   python render_opus_tc_v4.py --raw raw.mp4 --words words.json --out clip.mp4 --font Mv.ttf --yunet yunet.onnx \
       --asd asd/ --splices 12.4,28.0 --path-json path.json [--profile podcast] [--frames A:B] [--title "..."]
 """
@@ -38,53 +38,53 @@ ap.add_argument('--out', required=True); ap.add_argument('--font', required=True
 ap.add_argument('--yunet', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'yunet.onnx'))
 ap.add_argument('--sub-y', type=int, default=1480); ap.add_argument('--title', default='')
 ap.add_argument('--det-every', type=int, default=3)
-ap.add_argument('--face-frac', type=float, default=0.29, help='цільова висота обличчя / висота кропу (зум у широких планах). v3.1: 0.29 — в Opus обличчя 0.25–0.30 висоти кадру (було 0.32)')
-ap.add_argument('--min-crop', type=float, default=-1, help='мінімальна висота кропу як частка кадру; -1 = авто (4K → до 1080 px, 1080p → 1.0 без дозуму); 0.6 = дозум за face-frac')
-ap.add_argument('--sface', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'face_recognition_sface_2021dec.onnx'), help='v1.4: модель SFace для ідентичності людей між планами')
-ap.add_argument('--sface-thr', type=float, default=0.45, help='v1.4: поріг cos-схожості «та сама людина»')
-ap.add_argument('--path-json', default='', help='кеш траєкторії камери: якщо файл є — пропускаємо детекцію')
-ap.add_argument('--frames', default='', help='A:B — рендерити лише кадри [A,B) (для рендеру частинами)')
-ap.add_argument('--path-only', action='store_true', help='лише порахувати траєкторію і вийти')
-ap.add_argument('--switch-hold', type=float, default=2.6, help='v3.0: камера переходить на іншу людину, лише якщо вона веде ≥ стільки секунд. Коротші вкидання ігноруємо — Opus так робить (видимий = мовець лише 62 %% часу)')
-ap.add_argument('--band', type=int, default=2, help='v3.0: скільки разів за кліп виходити на кадр-смугу з розмитим верхом/низом (референс Opus: 1–3 рази, 10 %% часу)')
-ap.add_argument('--band-len', type=float, default=3.0, help='v3.0: цільова тривалість такого кадру (референс 1.5–4.5 с)')
-ap.add_argument('--band-end', type=int, default=1, help='v3.0: один із виходів на смугу — у фіналі кліпу')
-ap.add_argument('--min-dwell', type=float, default=1.6, help='v1.3: новий спікер має вести ≥ стільки секунд, інакше камера не перемикається (вигуки «звичайно», мікрозвуки)')
-ap.add_argument('--min-hold', type=float, default=2.5, help='v1.3: після перемикання тримаємо кадр ≥ стільки секунд')
-ap.add_argument('--snap', type=float, default=0.6, help='v1.3: підтягувати момент перемикання до найближчої паузи в мовленні (±с, 0 = вимкнути)')
-ap.add_argument('--sharpen', type=float, default=-1, help='v1.3: unsharp після масштабування (0..1); -1 = авто (0.35 при апскейлі, 0 при даунскейлі з 4K)')
-ap.add_argument('--title-sec', type=float, default=0, help='v1.3: скільки секунд тримати плашку-хук (0 = увесь кліп, як у ep2)')
-ap.add_argument('--caps', type=int, default=1, help='v2.0: субтитри ВЕЛИКИМИ літерами (як Opus)')
-ap.add_argument('--hl', default='yellow', help='v2.0: колір підсвітки активного слова: yellow | green')
-ap.add_argument('--weight', default='ExtraBold', help='v3.1: named instance змінного шрифту для підписів і плашки (ExtraBold | Bold | Black)')
-ap.add_argument('--band-wide', type=float, default=0.22, help='v3.1: план вважається широким (кандидат на кадр-смугу), якщо обличчя мовця менше за цю частку висоти джерела')
-ap.add_argument('--cap-hold', type=float, default=0.6, help='v3.1: скільки секунд підпис лишається після кінця фрази, якщо наступна фраза не поруч (Opus: підпис не висить у паузах)')
-ap.add_argument('--font-max', type=int, default=72, help='v2.0: максимальний кегль субтитрів (Opus ~64-72 px)')
-ap.add_argument('--face-y', type=float, default=0.19, help='v2.4: зсув кропу вниз → обличчя вище в кадрі; 0.19 дає центр обличчя на 0.31 висоти (як в Opus), 0.10 було на 0.40')
-ap.add_argument('--min-face', type=float, default=0.11, help='v2.0: обличчя спікера менше за цю частку висоти → режим WIDE')
-ap.add_argument('--split', action='store_true', help='v2.0: дозволити режим SPLIT (двоє один над одним)')
-ap.add_argument('--hold-max', type=float, default=5.5, help='v2.2: якщо один ракурс тримається довше — вставляємо власний різ на паузі в мовленні (референс Opus: 90 %% витримок ≤ 6.4 с)')
-ap.add_argument('--hold-min', type=float, default=2.0, help='v2.2: коротше за це ракурс не тримаємо (референс: 19 %% витримок < 1.5 с — це різи самого джерела, свої такими не робимо)')
-ap.add_argument('--punch', type=float, default=0.84, help='v2.2: наскільки тісніший «підріз» при власному різі (0.84 = на 16 %% крупніше)')
-ap.add_argument('--cut-peak', type=float, default=1.8, help='v2.1: у скільки разів різниця має перевищувати сусідні, щоб вважатись різом (пік, а не рух)')
-ap.add_argument('--hold-tail', type=int, default=1, help='v2.3: не різати під час фінальної фрази (панчлайн тримаємо одним кадром)')
-ap.add_argument('--min-seg', type=float, default=2.0, help='v2.1: коротші сегменти кадру приліплюються до попереднього (щоб не блимало)')
-ap.add_argument('--min-shot', type=float, default=0.3, help='v2.0: плани коротші за це приліплюються до попереднього (v3.3: 0.3 — навіть короткий план джерела має власний кадр, а не чужий кроп)')
-ap.add_argument('--short-shot', type=float, default=2.0, help='v3.3: план джерела коротший за це і не крупний (обличчя < band-wide) → показуємо смугою (весь кадр, розмитий верх/низ), а не кропом: кроп широкого плану на 1–2 с читається як стрибок')
-ap.add_argument('--cut-thr', type=float, default=0, help='v2.0: поріг детекції зміни плану (0 = авто)')
-ap.add_argument('--wide-auto', type=int, default=1, help='v2.0: при джерелі ≥1440p режим WIDE вимикається сам (кроп повної висоти й так різкий)')
-ap.add_argument('--no-wide', action='store_true', help='v2.0: вимкнути режим WIDE (завжди кроп)')
-ap.add_argument('--asd', default='', help='v1.5: тека з результатом run_asd_cpu_patched.py (Light-ASD) для цього ж кліпу — спікер за справжнім ASD')
-ap.add_argument('--splices', default='', help='v1.5: моменти внутрішніх склейок кліпу (с, через кому): перемикання спікера в межах 2 с після склейки притягується до неї')
-ap.add_argument('--debug', default='', help='A:B — вивести AV-кореляцію/рух по персонах у секундах [A,B]')
-ap.add_argument('--det-width', type=int, default=960, help='ширина кадру для детекції облич (4K і 1080p однаково)')
-ap.add_argument('--profile', default='podcast', choices=['podcast', 'solo'], help='набір параметрів під формат джерела (див. докстрінг)')
-ap.add_argument('--punch-gap', type=float, default=9.0, help='solo: мінімальний крок між власними різами (с); різи лише на межах речень')
-ap.add_argument('--words-per-line', type=int, default=3, help='скільки слів у рядку підпису (selection-standard: 2-3)')
-ap.add_argument('--crf', type=int, default=16, help='x264 crf фінального кодування (15 = максимум, 17 = як ep3 v3.2)')
+ap.add_argument('--face-frac', type=float, default=0.29, help='target face height / crop height (zoom on wide shots). v3.1: 0.29, in Opus the face is 0.25-0.30 of the frame height (was 0.32)')
+ap.add_argument('--min-crop', type=float, default=-1, help='minimum crop height as a fraction of the frame; -1 = auto (4K: down to 1080 px, 1080p: 1.0 without extra zoom); 0.6 = zoom to face-frac')
+ap.add_argument('--sface', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'face_recognition_sface_2021dec.onnx'), help='v1.4: SFace model for person identity across shots')
+ap.add_argument('--sface-thr', type=float, default=0.45, help='v1.4: cosine-similarity threshold for "same person"')
+ap.add_argument('--path-json', default='', help='camera trajectory cache: if the file exists, detection is skipped')
+ap.add_argument('--frames', default='', help='A:B - render only frames [A,B) (for chunked rendering)')
+ap.add_argument('--path-only', action='store_true', help='only compute the trajectory and exit')
+ap.add_argument('--switch-hold', type=float, default=2.6, help='v3.0: the camera switches to another person only if they lead for at least this many seconds. Shorter interjections are ignored, as Opus does (the visible person is the speaker only 62 %% of the time)')
+ap.add_argument('--band', type=int, default=2, help='v3.0: how many times per clip to go to a band frame with blurred top/bottom (Opus reference: 1-3 times, 10 %% of the time)')
+ap.add_argument('--band-len', type=float, default=3.0, help='v3.0: target duration of such a frame (reference 1.5-4.5 s)')
+ap.add_argument('--band-end', type=int, default=1, help='v3.0: one of the band shots is at the end of the clip')
+ap.add_argument('--min-dwell', type=float, default=1.6, help='v1.3: a new speaker must lead for at least this many seconds, otherwise the camera does not switch (exclamations like "of course", micro-sounds)')
+ap.add_argument('--min-hold', type=float, default=2.5, help='v1.3: after a switch, hold the frame for at least this many seconds')
+ap.add_argument('--snap', type=float, default=0.6, help='v1.3: snap the switch moment to the nearest speech pause (+-s, 0 = off)')
+ap.add_argument('--sharpen', type=float, default=-1, help='v1.3: unsharp after scaling (0..1); -1 = auto (0.35 when upscaling, 0 when downscaling from 4K)')
+ap.add_argument('--title-sec', type=float, default=0, help='v1.3: how many seconds to hold the hook plate (0 = the whole clip, as in ep2)')
+ap.add_argument('--caps', type=int, default=1, help='v2.0: subtitles in CAPITAL letters (as Opus)')
+ap.add_argument('--hl', default='yellow', help='v2.0: highlight colour of the active word: yellow | green')
+ap.add_argument('--weight', default='ExtraBold', help='v3.1: named instance of the variable font for captions and the plate (ExtraBold | Bold | Black)')
+ap.add_argument('--band-wide', type=float, default=0.22, help='v3.1: a shot counts as wide (a band-frame candidate) if the speaker face is smaller than this fraction of the source height')
+ap.add_argument('--cap-hold', type=float, default=0.6, help='v3.1: how many seconds a caption stays after the end of the phrase if the next phrase is not close (Opus: captions do not hang in pauses)')
+ap.add_argument('--font-max', type=int, default=72, help='v2.0: maximum subtitle font size (Opus ~64-72 px)')
+ap.add_argument('--face-y', type=float, default=0.19, help='v2.4: shift the crop down so the face sits higher in the frame; 0.19 puts the face center at 0.31 of the height (as in Opus), 0.10 gave 0.40')
+ap.add_argument('--min-face', type=float, default=0.11, help='v2.0: speaker face smaller than this fraction of the height -> WIDE mode')
+ap.add_argument('--split', action='store_true', help='v2.0: allow SPLIT mode (two people one above the other)')
+ap.add_argument('--hold-max', type=float, default=5.5, help='v2.2: if one angle is held longer, insert an own cut at a speech pause (Opus reference: 90 %% of shots <= 6.4 s)')
+ap.add_argument('--hold-min', type=float, default=2.0, help='v2.2: we do not hold an angle shorter than this (reference: 19 %% of shots < 1.5 s are source cuts, our own cuts are never that short)')
+ap.add_argument('--punch', type=float, default=0.84, help='v2.2: how much tighter the punch-in is on an own cut (0.84 = 16 %% closer)')
+ap.add_argument('--cut-peak', type=float, default=1.8, help='v2.1: how many times a difference must exceed its neighbours to count as a cut (a peak, not motion)')
+ap.add_argument('--hold-tail', type=int, default=1, help='v2.3: do not cut during the final phrase (the punchline is held as one frame)')
+ap.add_argument('--min-seg', type=float, default=2.0, help='v2.1: shorter frame segments are merged into the previous one (to avoid flicker)')
+ap.add_argument('--min-shot', type=float, default=0.3, help='v2.0: shots shorter than this are merged into the previous one (v3.3: 0.3, even a short source shot gets its own frame, not a crop of another one)')
+ap.add_argument('--short-shot', type=float, default=2.0, help='v3.3: a source shot shorter than this and not a close-up (face < band-wide) is shown as a band (full frame, blurred top/bottom) instead of a crop: a crop of a wide shot for 1-2 s reads as a jump')
+ap.add_argument('--cut-thr', type=float, default=0, help='v2.0: threshold for shot-change detection (0 = auto)')
+ap.add_argument('--wide-auto', type=int, default=1, help='v2.0: with a source >= 1440p, WIDE mode turns itself off (a full-height crop is sharp enough anyway)')
+ap.add_argument('--no-wide', action='store_true', help='v2.0: turn off WIDE mode (always crop)')
+ap.add_argument('--asd', default='', help='v1.5: folder with the output of run_asd_cpu_patched.py (Light-ASD) for the same clip, speaker by real ASD')
+ap.add_argument('--splices', default='', help='v1.5: moments of internal splices of the clip (s, comma-separated): a speaker switch within 2 s after a splice is pulled to it')
+ap.add_argument('--debug', default='', help='A:B - print AV correlation/motion per person for seconds [A,B]')
+ap.add_argument('--det-width', type=int, default=960, help='frame width for face detection (same for 4K and 1080p)')
+ap.add_argument('--profile', default='podcast', choices=['podcast', 'solo'], help='parameter set for the source format (see the docstring)')
+ap.add_argument('--punch-gap', type=float, default=9.0, help='solo: minimum step between own cuts (s); cuts only at sentence boundaries')
+ap.add_argument('--words-per-line', type=int, default=3, help='words per caption line (selection-standard: 2-3)')
+ap.add_argument('--crf', type=int, default=16, help='x264 crf of the final encode (15 = maximum, 17 = like ep3 v3.2)')
 _argv = sys.argv[1:]
 a = ap.parse_args()
-# ---- профілі: значення профілю застосовуються лише до параметрів, яких НЕ задано явно в командному рядку ----
+# ---- profiles: profile values apply only to parameters NOT given explicitly on the command line ----
 PROFILES = {
     'podcast': dict(punch=1.0, hold_max=9.0, band=1, short_shot=1.5, min_crop=1.0, hl='yellow'),
     'solo':    dict(band=0, band_wide=0.0, switch_hold=60.0, min_dwell=60.0, face_frac=0.22, punch=0.76, hl='#C82828', hold_max=9.0),
@@ -97,14 +97,14 @@ OW, OH = 1080, 1920
 
 # ---------------- pass 1: faces, identity, speaker, camera path ----------------
 cap = cv2.VideoCapture(a.raw); fps = cap.get(5) or 30; n = int(cap.get(7)); W = int(cap.get(3)); H = int(cap.get(4))
-CW = int(round(H * 9 / 16)); CW = min(CW, W)            # ширина кропу при повній висоті
-MIN_CROP = a.min_crop if a.min_crop > 0 else (0.62 if H >= 1440 else 1.0)   # auto: з 4K дозум до 0.62 кадру (апскейл 1.4×, кадр як в Opus); з 1080p — без дозуму
-AUTO_NOWIDE = (not a.no_wide) and (a.wide_auto and H >= 1440)   # 4K/1440p: широкий план теж кропимо (різкості вистачає)
+CW = int(round(H * 9 / 16)); CW = min(CW, W)            # crop width at full height
+MIN_CROP = a.min_crop if a.min_crop > 0 else (0.62 if H >= 1440 else 1.0)   # auto: from 4K zoom down to 0.62 of the frame (1.4x upscale, a frame like Opus); from 1080p, no extra zoom
+AUTO_NOWIDE = (not a.no_wide) and (a.wide_auto and H >= 1440)   # 4K/1440p: a wide shot is cropped too (sharpness is enough)
 CACHED = None
 if a.path_json and os.path.exists(a.path_json):
     CACHED = json.load(open(a.path_json)); n = CACHED['n']; path = CACHED['path']; cap.release()
 if CACHED is None:
-  # три масштаби: mid (≤1920 завширшки) — рот і ембеддинги; small (det-width) — детекція
+  # three scales: mid (<= 1920 wide) - mouth and embeddings; small (det-width) - detection
   MS = min(1.0, 1920.0 / W); MW, MH = int(round(W * MS)), int(round(H * MS)); MINV = 1.0 / MS
   DS = min(1.0, a.det_width / MW); DW, DH = int(round(MW * DS)), int(round(MH * DS)); DINV = 1.0 / DS
   det = cv2.FaceDetectorYN.create(a.yunet, '', (DW, DH), 0.6, 0.3, 200)
@@ -115,8 +115,8 @@ if CACHED is None:
       ax0, ay0, aw, ah = a_; bx0, by0, bw, bh = b_
       ix = max(0, min(ax0 + aw, bx0 + bw) - max(ax0, bx0)); iy = max(0, min(ay0 + ah, by0 + bh) - max(ay0, by0))
       inter = ix * iy; return inter / (aw * ah + bw * bh - inter + 1e-6)
-  tracks = {}; ARCH = {}   # id -> dict(box(mid), patch, score, last, embs, last_emb, frames); ARCH — завершені треки
-  CUTS = []; _pg = None; DIFFS = []   # v2.0: межі планів джерела (адаптивний поріг кадрової різниці)
+  tracks = {}; ARCH = {}   # id -> dict(box(mid), patch, score, last, embs, last_emb, frames); ARCH - finished tracks
+  CUTS = []; _pg = None; DIFFS = []   # v2.0: source shot boundaries (adaptive frame-difference threshold)
   next_id = 0; samples = []   # (frame_idx, {tid: (score, box_mid)})
   fi = 0
   while True:
@@ -135,9 +135,9 @@ if CACHED is None:
           faces = [] if faces is None else [f for f in faces if f[2] * f[3] > 0.0012 * DW * DH]
           seen = set()
           for f in faces:
-              fm = f.copy(); fm[:14] *= DINV            # координати в mid
+              fm = f.copy(); fm[:14] *= DINV            # coordinates in mid
               box = tuple(float(v) for v in fm[:4]); lm = fm[4:14]
-              rmx, rmy, lmx, lmy = lm[6], lm[7], lm[8], lm[9]     # кути рота
+              rmx, rmy, lmx, lmy = lm[6], lm[7], lm[8], lm[9]     # mouth corners
               mcx, mcy = (rmx + lmx) / 2, (rmy + lmy) / 2; mw = max(10, abs(lmx - rmx) * 1.6); mh = max(8, mw * 0.55)
               x0, y0 = int(max(0, mcx - mw / 2)), int(max(0, mcy - mh / 2)); x1, y1 = int(min(MW, mcx + mw / 2)), int(min(MH, mcy + mh / 2))
               patch = cv2.resize(gray[y0:y1, x0:x1], (32, 16)).astype(np.float32) if x1 > x0 + 3 and y1 > y0 + 3 else None
@@ -154,7 +154,7 @@ if CACHED is None:
                   motion = float(np.mean(np.abs(patch - t['patch']))) if (patch is not None and t['patch'] is not None) else 0.0
                   t['box'] = box; t['patch'] = patch; t['last'] = fi; t['row'] = fm
               t = tracks[bid]; t['score'] = 0.6 * t['score'] + 0.4 * motion; t['motion'] = motion; t['frames'] += 1; seen.add(bid)
-              # ембеддинг особи: на появі треку і далі кожні ~2 с (до 6 на трек)
+              # face embedding: when a track appears and then every ~2 s (up to 6 per track)
               if rec is not None and (fi - t['last_emb']) >= 2 * fps and len(t['embs']) < 6 and box[2] * box[3] > 900:
                   try:
                       al = rec.alignCrop(mid, fm); e = rec.feature(al).flatten(); e = e / (np.linalg.norm(e) + 1e-9)
@@ -166,7 +166,7 @@ if CACHED is None:
       fi += 1
   cap.release(); n = fi
   ARCH.update(tracks)
-  # ---- v1.4: ідентичність через SFace: трек → персона (жадібна кластеризація, cos ≥ sface-thr) ----
+  # ---- v1.4: identity via SFace: track -> person (greedy clustering, cos >= sface-thr) ----
   person_of = {}; persons = []   # persons[k] = centroid
   for tid in sorted(ARCH, key=lambda k: -ARCH[k]['frames']):
       E = ARCH[tid]['embs']
@@ -180,11 +180,11 @@ if CACHED is None:
           person_of[tid] = bk; persons[bk] = persons[bk] * 0.7 + c * 0.3; persons[bk] /= (np.linalg.norm(persons[bk]) + 1e-9)
       else:
           person_of[tid] = len(persons); persons.append(c)
-  # треки без ембеддингу (малі/бічні обличчя) — власна персона, щоб не плутати
+  # tracks without an embedding (small/profile faces) become their own person, to avoid mixing them up
   npers = len(persons)
   for tid in ARCH:
       if person_of.get(tid) is None: person_of[tid] = npers; npers += 1
-  # ---- спікер офлайн на рівні персон ----
+  # ---- speaker offline at the person level ----
   words_all = json.load(open(a.words, encoding='utf-8')); WORDS_RAW = words_all
   gaps = []
   for i in range(1, len(words_all)):
@@ -197,7 +197,7 @@ if CACHED is None:
           pid = person_of[tid]
           if pid not in pl or sc > pl[pid][0]: pl[pid] = (sc, box, tid, mo)
       plive_all.append((f, pl))
-  # ---- v1.4: аудіо-візуальна кореляція (легкий ASD): рух рота спікера корелює з енергією мови ----
+  # ---- v1.4: audio-visual correlation (light ASD): the speaker mouth motion correlates with speech energy ----
   try:
       raw = subprocess.run(['ffmpeg', '-v', 'error', '-i', a.raw, '-ac', '1', '-ar', '8000', '-f', 's16le', '-'], capture_output=True).stdout
       au = np.abs(np.frombuffer(raw, np.int16).astype(np.float32))
@@ -207,7 +207,7 @@ if CACHED is None:
   env = (env - env.mean()) / (env.std() + 1e-6)
   pids_all = sorted({pid for _, pl in plive_all for pid in pl})
   M = {pid: np.array([pl[pid][3] if pid in pl else np.nan for _, pl in plive_all]) for pid in pids_all}
-  HW = max(3, int(round(0.75 * fps / a.det_every)))   # ±0.75 с
+  HW = max(3, int(round(0.75 * fps / a.det_every)))   # +-0.75 s
   def avcorr(pid, i):
       m = M[pid][max(0, i - HW):i + HW + 1]; e = env[max(0, i - HW):i + HW + 1]
       ok = ~np.isnan(m)
@@ -216,14 +216,14 @@ if CACHED is None:
       if m.std() < 1e-6 or e.std() < 1e-6: return 0.0
       return float(np.clip(np.corrcoef(m, e)[0, 1], 0, 1))
   AV = [{pid: avcorr(pid, i) for pid in pl} for i, (_, pl) in enumerate(plive_all)]
-  # combined per-sample score: кореляція (головне) + нормований рух (підтримка)
+  # combined per-sample score: correlation (main) + normalized motion (support)
   mmax = max([v for pid in M for v in M[pid][~np.isnan(M[pid])]] + [1e-6])
   for i, (_, pl) in enumerate(plive_all):
       for pid in list(pl):
           sc, box, tid, mo = pl[pid]
           pl[pid] = (AV[i][pid] + 0.3 * mo / mmax, box, tid, mo)
   MARGIN = 0.15
-  # ---- v1.5: справжній ASD (Light-ASD, run_asd_cpu_patched.py) замість проксі, якщо є ----
+  # ---- v1.5: real ASD (Light-ASD, run_asd_cpu_patched.py) instead of the proxy, if available ----
   USE_ASD = False
   if a.asd and os.path.exists(os.path.join(a.asd, 'pywork', 'tracks.pckl')) and os.path.exists(os.path.join(a.asd, 'pywork', 'scores.pckl')):
       import pickle
@@ -232,10 +232,10 @@ if CACHED is None:
       AW, AFPS = 0, 0
       if os.path.exists(os.path.join(a.asd, 'pyavi', 'video.avi')):
           capA = cv2.VideoCapture(os.path.join(a.asd, 'pyavi', 'video.avi')); AW = capA.get(3) or 0; AFPS = capA.get(5) or 0; capA.release()
-      if not AW and os.path.exists(os.path.join(a.asd, 'dims.json')):      # v3.1: pyavi прибрано після рендеру — розміри з dims.json
+      if not AW and os.path.exists(os.path.join(a.asd, 'dims.json')):      # v3.1: pyavi is removed after render, so take the dimensions from dims.json
           _dm = json.load(open(os.path.join(a.asd, 'dims.json'))); AW = float(_dm.get('w', 0)); AFPS = float(_dm.get('fps', 25))
       if not AW:
-          print('!!! УВАГА: ASD без pyavi/video.avi і без dims.json — беру ширину 1920/25 fps, оцінки ASD можуть не збігтися з обличчями', flush=True); AW = 1920
+          print('!!! WARNING: ASD without pyavi/video.avi and without dims.json, using width 1920/25 fps, ASD scores may not match the faces', flush=True); AW = 1920
       AFPS = AFPS or 25
       ASC = MW / AW
       # per ASD-frame: list of (bbox_mid, score)
@@ -261,13 +261,13 @@ if CACHED is None:
               if sc is not None: hit += 1
               pl[pid] = ((sc if sc is not None else -1.5), box, tid, mo)
       USE_ASD = True; MARGIN = 0.4
-      print(f'ASD: {len(atr)} треків, покриття {hit}/{sum(len(pl) for _, pl in plive_all)} облич', flush=True)
+      print(f'ASD: {len(atr)} tracks, coverage {hit}/{sum(len(pl) for _, pl in plive_all)} faces', flush=True)
   if a.debug:
       d0, d1 = [float(x) for x in a.debug.split(':')]
       for i, (f, pl) in enumerate(plive_all):
           if d0 <= f / fps <= d1:
               print(f'{f/fps:5.2f}s env={env[i]:+.2f} ' + ' '.join(f'P{pid}:sc={pl[pid][0]:.2f},mo={pl[pid][3]:.2f}' for pid in sorted(pl)))
-  # лідер за вибіркою: у перші 1.5 с нового плану (усі треки нові) дивимося вперед — сумарний рух за 1.5 с
+  # leader by sample: in the first 1.5 s of a new shot (all tracks are new) look ahead - total motion over 1.5 s
   lead = []; cur = None; prev_ids = set()
   win = int(round(1.5 * fps / a.det_every))
   for i, (f, pl) in enumerate(plive_all):
@@ -280,11 +280,11 @@ if CACHED is None:
               for pid, v in plive_all[j][1].items():
                   if pid in acc: acc[pid] += v[0]
           top = max(acc, key=acc.get)
-          # якщо поточний спікер видимий і не програє явно — лишаємо його (тяглість через зміну плану)
+          # if the current speaker is visible and clearly not losing, keep them (continuity across a shot change)
           if cur in acc and acc[top] <= acc[cur] + MARGIN * win: top = cur
       else:
           top = max(pl, key=lambda k: pl[k][0])
-          if cur in pl and pl[top][0] <= pl[cur][0] + MARGIN: top = cur   # ASD: порівнюємо відносно, навіть якщо обидва < 0 (малі обличчя в широкому плані)
+          if cur in pl and pl[top][0] <= pl[cur][0] + MARGIN: top = cur   # ASD: compare relatively, even if both are < 0 (small faces in a wide shot)
           elif cur is not None and cur not in pl and len(pl) == 1: top = next(iter(pl))
           elif cur is not None and cur not in pl: top = top
       cur = top; lead.append((f, top))
@@ -310,12 +310,12 @@ if CACHED is None:
                   del runs[k]
               changed = True
       return runs
-  runs = merge_short(runs, max(a.min_dwell, a.switch_hold) * fps)   # v3.0: вкидання коротші за switch-hold камеру не рухають
+  runs = merge_short(runs, max(a.min_dwell, a.switch_hold) * fps)   # v3.0: interjections shorter than switch-hold do not move the camera
   runs = merge_short(runs, a.min_hold * fps)
   SPL = [float(x) for x in a.splices.split(',') if x.strip()] if a.splices else []
   for i in range(1, len(runs)):
       t = runs[i][1] / fps
-      cand = [x for x in SPL if -0.3 <= t - x <= 2.0]      # склейка трохи раніше за перемикання → ріжемо на склейці
+      cand = [x for x in SPL if -0.3 <= t - x <= 2.0]      # a splice slightly before the switch -> cut at the splice
       if cand:
           nf = int(round(max(cand) * fps)); runs[i - 1][2] = nf - 1; runs[i][1] = nf; continue
       if a.snap > 0 and gaps:
@@ -325,20 +325,20 @@ if CACHED is None:
   spk = [None] * n
   for pid, f0, f1 in runs:
       for f in range(max(0, f0), min(n, f1 + 1)): spk[f] = pid
-  # ціль камери: бокс спікера в поточному плані; якщо спікера в плані нема (реакція) — найбільше обличчя
+  # camera target: the speaker box in the current shot; if the speaker is not in the shot (a reaction), the largest face
   samples2 = []
   for (f, pl) in plive_all:
       pid = spk[f]
       reaction = False
       if pid in pl: sc, box, tid, _mo = pl[pid]
-      elif pl: sc, box, tid, _mo = max(pl.values(), key=lambda v: v[1][2] * v[1][3]); reaction = True   # спікера в плані нема — це реакція
+      elif pl: sc, box, tid, _mo = max(pl.values(), key=lambda v: v[1][2] * v[1][3]); reaction = True   # the speaker is not in the shot: this is a reaction
       else: samples2.append((f, None, None, 0, None, None)); continue
       cx = (box[0] + box[2] / 2) * MINV; cy = (box[1] + box[3] / 2) * MINV; fh = box[3] * MINV   # full-res
-      if reaction: fh = H * a.face_frac * 2   # реакційний план — без дозуму, найширший кроп (читається як cutaway, а не як помилка камери)
+      if reaction: fh = H * a.face_frac * 2   # reaction shot: no extra zoom, widest crop (reads as a cutaway, not as a camera mistake)
       samples2.append((f, cx, tid, len(pl), cy, fh))
   samples = samples2
-  print(f'persons: {len(persons)} (+{npers - len(persons)} без ембеддингу) | speaker runs: {len(runs)} → ' + ', '.join(f'P{pid}@{f0/fps:.1f}-{f1/fps:.1f}' for pid, f0, f1 in runs), flush=True)
-  # ---- v2.1: різ плану = ПІК у різниці кадрів (рух людини дає плато, різ — одиничний сплеск) ----
+  print(f'persons: {len(persons)} (+{npers - len(persons)} without embedding) | speaker runs: {len(runs)} → ' + ', '.join(f'P{pid}@{f0/fps:.1f}-{f1/fps:.1f}' for pid, f0, f1 in runs), flush=True)
+  # ---- v2.1: shot cut = a PEAK in the frame difference (a moving person gives a plateau, a cut is a single spike) ----
   fr_idx = [f for f, _ in DIFFS]; dvals = [d for _, d in DIFFS]
   dv = np.array(dvals[1:]) if len(dvals) > 2 else np.array([0.0])
   med = float(np.median(dv))
@@ -350,18 +350,18 @@ if CACHED is None:
       if d > base and d > a.cut_peak * max(nb, 0.5):
           CUTS.append(fr_idx[i])
   CUTS = [c for i, c in enumerate(CUTS) if i == 0 or c - CUTS[i - 1] > 0.35 * fps]
-  print(f'різи джерела: {len(CUTS)} (поріг {base:.1f}, пік ×{a.cut_peak}, медіанна різниця {med:.1f})', flush=True)
-  # ---- v2.0: плани джерела + режим кадру на кожен план ----
+  print(f'source cuts: {len(CUTS)} (threshold {base:.1f}, peak x{a.cut_peak}, median difference {med:.1f})', flush=True)
+  # ---- v2.0: source shots + frame mode for each shot ----
   SM = {f: (cx, tid, cy, fh, nf) for (f, cx, tid, nf, cy, fh) in samples}
   face_by_frame = {f: pl for (f, pl) in plive_all}
-  # v3.5.9 (16.09): у цьому подкасті є вставки слайдів/графіки. Різниця кадрів їх не завжди ловить,
-  # і тоді слайд опиняється всередині плану зі спікером — кроп 9:16 ріже графік навпіл (видно на e4c03
-  # 42-54 с). Тому додаємо межу плану там, де обличчя зникають (або лишаються мізерні) довше за 1.2 с.
+  # v3.5.9 (16.09): this podcast has slide/graphics inserts. The frame difference does not always catch them,
+  # and then the slide ends up inside a shot with the speaker, and the 9:16 crop cuts the graphic in half (seen on e4c03
+  # 42-54 s). So we add a shot boundary where faces disappear (or stay negligible) for longer than 1.2 s.
   NOFACE = []
-  _sampled = sorted(face_by_frame)                      # обличчя рахуються лише на семплованих кадрах
+  _sampled = sorted(face_by_frame)                      # faces are counted only on sampled frames
   _step = max(1, int(np.median(np.diff(_sampled)))) if len(_sampled) > 2 else 1
-  # строго: жодного обличчя БУДЬ-ЯКОГО розміру. Загальний план студії (обличчя дрібні, але є) —
-  # це не графіка, він іде звичайним шляхом (смуга/кроп за правилами v3.5).
+  # strict: no face of ANY size. A wide studio shot (faces small, but present) -
+  # is not a graphic, it goes the usual way (band/crop by the v3.5 rules).
   _noface_f = [f for f in _sampled if not face_by_frame[f]]
   if _noface_f:
       _run0 = _prev = _noface_f[0]
@@ -370,26 +370,26 @@ if CACHED is None:
           if (_prev - _run0) / fps >= 1.2: NOFACE.append((_run0, _prev + 1))
           if _f is None: break
           _run0 = _prev = _f
-  if NOFACE: print(f'вставки без облич: {len(NOFACE)} (' + ', '.join(f'{x/fps:.1f}-{y/fps:.1f}с' for x, y in NOFACE) + ')', flush=True)
+  if NOFACE: print(f'inserts without faces: {len(NOFACE)} (' + ', '.join(f'{x/fps:.1f}-{y/fps:.1f}s' for x, y in NOFACE) + ')', flush=True)
   shots = []
   bounds = sorted({0, n} | {c for c in CUTS if 0 < c < n}
                   | {x for pair in NOFACE for x in pair if 0 < x < n})
   for i in range(len(bounds) - 1):
       f0, f1 = bounds[i], bounds[i + 1]
-      if shots and (f1 - f0) < a.min_shot * fps: shots[-1][1] = f1; continue   # надто короткий план — приліплюємо до попереднього
+      if shots and (f1 - f0) < a.min_shot * fps: shots[-1][1] = f1; continue   # too short a shot: merge into the previous one
       shots.append([f0, f1])
   if not shots: shots = [[0, n]]
   def shot_of(f):
       for k, (f0, f1) in enumerate(shots):
           if f0 <= f < f1: return k
       return len(shots) - 1
-  # для кожного плану: режим + геометрія
+  # for each shot: mode + geometry
   MODES = []
   for (f0, f1) in shots:
       fr_list = [f for f in SM if f0 <= f < f1]
       pid_here = collections.Counter(spk[f] for f in range(f0, min(n, f1)) if spk[f] is not None).most_common(1)
       pid_here = pid_here[0][0] if pid_here else None
-      boxes = []          # обличчя спікера в цьому плані (mid-координати)
+      boxes = []          # speaker faces in this shot (mid coordinates)
       allf = []
       for f in fr_list:
           pl = face_by_frame.get(f, {})
@@ -401,32 +401,32 @@ if CACHED is None:
           bh = np.median([b[3] for b in boxes]) * MINV
       else:
           bx = by = bh = None
-      # чи можна вмістити всіх у 9:16?
+      # can everyone fit into 9:16?
       xs = [(b[0] + b[2] / 2) * MINV for _, b in allf]
       spread = (max(xs) - min(xs)) if len(xs) > 1 else 0
       npers_here = len({pid for pid, _ in allf})
-      # v3.4 (правило Маріка 06.09, тверде): у ЗАГАЛЬНИЙ ПЛАН НІКОЛИ НЕ КРОПИМО — незалежно від тривалості.
-      # Загальний показуємо цілим: смуга 16:9 на всю ширину з розмитим верхом/низом. Кроп на загальному
-      # (спікер дрібний, у кадрі стіл і фон) із наступним стрибком на крупний — найгірший артефакт для нього.
-      # v3.5 (правка Маріка 07.09): смуга — лише для КОРОТКОГО загального плану (швидка перебивка, кроп читався б
-      # як стрибок). Якщо загальний тримається довше і спікера видно — кропимо його, а не показуємо смугу.
+      # v3.4 (rule from 06.09, hard): NEVER CROP A WIDE SHOT, regardless of duration.
+      # A wide shot is shown whole: a 16:9 band at full width with blurred top/bottom. A crop of a wide shot
+      # (speaker tiny, the table and background in frame) followed by a jump to a close-up is the worst artifact.
+      # v3.5 (correction from 07.09): a band only for a SHORT wide shot (a quick cutaway, a crop would read
+      # as a jump). If the wide shot lasts longer and the speaker is visible, we crop it instead of showing a band.
       sdur = (f1 - f0) / float(fps)
-      # v3.5.1 (07.09): смуга лише якщо план КОРОТКИЙ, або в кадрі взагалі немає облич.
-      # Довгий загальний, де мовця не впізнали (bh is None), але обличчя є — кропимо найбільше обличчя,
-      # а не показуємо смугу: інакше 4 с далекого плану, а потім стрибок на крупний.
-      # v3.5.2 (07.09): далекий план — смугою (як в Opus), але НЕ коли він впирається у склейку:
-      # там і так зміна сцени, і смуга поруч читається як стрибок — у цьому разі кропимо.
+      # v3.5.1 (07.09): a band only if the shot is SHORT, or there are no faces in frame at all.
+      # A long wide shot where the speaker was not recognized (bh is None) but faces exist: we crop the largest face,
+      # rather than show a band: otherwise 4 s of a far shot and then a jump to a close-up.
+      # v3.5.2 (07.09): a far shot is a band (as in Opus), but NOT when it runs into a splice:
+      # the scene changes there anyway, and a band next to it reads as a jump, so we crop in that case.
       _t0, _t1 = f0 / float(fps), f1 / float(fps)
       near_splice = any(abs(_t1 - sp) < 0.6 or abs(_t0 - sp) < 0.6 for sp in SPL)
       tiny = (bh is None) or (bh < a.band_wide * H)
-      # v3.5.6 (16.09): смуга коротша за 1.2 с або впритул до початку/кінця кліпу — це спалах,
-      # читається як глюк, а не як перебивка. Такий шматок кропимо, як довгий загальний план.
+      # v3.5.6 (16.09): a band shorter than 1.2 s, or right at the start/end of the clip, is a flash,
+      # it reads as a glitch, not as a cutaway. Such a piece is cropped like a long wide shot.
       near_edge = (_t0 < 0.6) or (_t1 > (n / float(fps)) - 0.6)
       if fr_list and not allf and any(x <= f0 and f1 <= y + 1 for x, y in NOFACE):
-          # v3.5.11 (16.09): план цілком лежить у зоні без облич — це слайд/графіка. Показуємо цілим
-          # кадром 16:9 (смуга), незалежно від тривалості: кроп 9:16 ріже графік навпіл.
-          # Перевірка саме по NOFACE, а не просто по порожньому allf: короткий план може не мати
-          # жодного семпла, і тоді порожній allf означав би «не знаю», а не «графіка».
+          # v3.5.11 (16.09): the shot lies entirely in a no-face zone: it is a slide/graphic. Show it as a whole
+          # 16:9 frame (a band) regardless of duration: a 9:16 crop cuts a graphic in half.
+          # The check is on NOFACE specifically, not simply on an empty allf: a short shot may have
+          # no samples at all, and then an empty allf would mean "unknown", not "graphic".
           MODES.append(('WIDE', None, None, None)); continue
       if tiny and (near_splice or near_edge or sdur > 4.5 or sdur < 1.2) and allf:
           _big = max(allf, key=lambda t: t[1][3])[1]
@@ -453,11 +453,11 @@ if CACHED is None:
           MODES.append(('WIDE', None, None, None))
   nsp = sum(1 for m in MODES if m[0] == 'SPEAKER'); nw = sum(1 for m in MODES if m[0] == 'WIDE'); nsl = sum(1 for m in MODES if m[0] == 'SPLIT')
   tw = sum((shots[k][1] - shots[k][0]) for k, m in enumerate(MODES) if m[0] == 'WIDE') / max(1, n)
-  print(f'планів джерела: {len(shots)} ({len(shots)/(n/fps)*60:.1f}/хв) | SPEAKER {nsp}, WIDE {nw} ({tw:.0%} часу), SPLIT {nsl}', flush=True)
-  # ---- v2.1: СЕГМЕНТИ КАДРУ = межі планів джерела ∪ межі мовця ∪ склейки ----
-  # Один нерухомий кадр на сегмент. Усередині сегмента камера не рухається й не перекадровується:
-  # людина може нахилятися, жестикулювати — кадр стоїть. Кадр міняється лише коли ріже джерело
-  # або коли починає говорити інша людина (рев'ю Маріка 05.09: «є загальний план — і ти зразу ж на спікері»).
+  print(f'source shots: {len(shots)} ({len(shots)/(n/fps)*60:.1f}/min) | SPEAKER {nsp}, WIDE {nw} ({tw:.0%} of the time), SPLIT {nsl}', flush=True)
+  # ---- v2.1: FRAME SEGMENTS = union of source shot boundaries, speaker boundaries and splices ----
+  # One static frame per segment. Inside a segment the camera does not move or reframe:
+  # a person may lean or gesture, the frame stays. The frame changes only when the source cuts
+  # or when another person starts speaking (review 05.09: "there is a wide shot, and you are immediately on the speaker").
   target = [None] * n
   last = None
   for (f, cx, tid, nf, cy, fh) in samples: target[f] = (cx, tid, cy, fh)
@@ -476,11 +476,11 @@ if CACHED is None:
   SPL_SNAP = []
   for f in SPL_F:
       near = [c for c in cut_set if abs(c - f) <= 0.8 * fps]
-      SPL_SNAP.append(min(near, key=lambda c: abs(c - f)) if near else f)   # склейка поруч із різом джерела = один різ
+      SPL_SNAP.append(min(near, key=lambda c: abs(c - f)) if near else f)   # a splice next to a source cut = one cut
   SPL_F = sorted(set(SPL_SNAP))
   bset |= set(SPL_F)
-  # v2.3: панчлайн тримаємо одним кадром. У швидкому обміні (троє домовляють фразу по черзі) камера
-  # не встигає за спікером і кришить фінал — тому в останньому реченні різів немає.
+  # v2.3: the punchline is held as one frame. In a fast exchange (three people finishing a phrase in turns)
+  # the camera cannot keep up with the speaker and chops up the finale, so there are no cuts in the last sentence.
   TAIL_CUT = n
   if PUNCH_SENTENCE: a.hold_max = max(a.hold_max, a.punch_gap)
   if a.hold_tail and WORDS_RAW:
@@ -492,18 +492,18 @@ if CACHED is None:
           if w['w'].rstrip()[-1:] in '.!?…' or gap >= 0.35:
               tail = nx['t']
               if te - tail >= 2.5: break
-      tail = min(max(tail, te - 5.0), te - 2.0)   # панчлайн — останні 2–5 с
+      tail = min(max(tail, te - 5.0), te - 2.0)   # punchline: the last 2-5 s
       cutoff = int(round(tail * fps)); TAIL_CUT = cutoff
       drop = {x for x in bset if x > cutoff}
       if drop or True:
           bset -= drop
-          bset.add(cutoff)          # сам початок фінальної фрази — це різ: панчлайн отримує власний кадр
-          bset.add(n)               # v3.2: кінець кліпу теж вилітав у drop → фінальна фраза жила в кадрі попереднього сегмента (витримки 8–12 с)
-          print(f'фінальна фраза з {tail:.1f} с — тримаємо одним кадром (прибрано {len(drop) - 1} різів)', flush=True)
-  # v2.2: власні різи в довгих статичних планах — інакше картинка стоїть 20+ с і глядач іде.
-  # Референс (6 кліпів Opus, 74 витримки): медіана 3.4 с, p75 5.0, p90 6.4, майже нічого > 8 с.
-  # точки, де можна різати: пауза в мовленні АБО межа фрази за пунктуацією.
-  # (в авто-субтитрах YouTube пауз майже немає — слова стикуються, тож пунктуація тут головний сигнал)
+          bset.add(cutoff)          # the start of the final phrase itself is a cut: the punchline gets its own frame
+          bset.add(n)               # v3.2: the end of the clip also fell into drop, so the final phrase lived in the frame of the previous segment (shots of 8-12 s)
+          print(f'final phrase from {tail:.1f} s: held as one frame ({len(drop) - 1} cuts removed)', flush=True)
+  # v2.2: own cuts in long static shots, otherwise the picture sits for 20+ s and the viewer leaves.
+  # Reference (6 Opus clips, 74 shots): median 3.4 s, p75 5.0, p90 6.4, almost nothing > 8 s.
+  # points where we can cut: a speech pause OR a phrase boundary by punctuation.
+  # (YouTube auto-subtitles have almost no pauses, words run together, so punctuation is the main signal here)
   gaps_f = []
   for i in range(1, len(WORDS_RAW)):
       pw = WORDS_RAW[i - 1]; pe = pw.get('e', pw['t'] + 0.2)
@@ -513,10 +513,10 @@ if CACHED is None:
   def snap_to_pause(f, win=0.7):
       cand = [g for g in gaps_f if abs(g - f) <= win * fps]
       return min(cand, key=lambda g: abs(g - f)) if cand else None
-  # v3.2: межі між словами (навіть без паузи) — запасний варіант, коли поруч немає ні паузи, ні пунктуації:
-  # інакше план стояв 9–12 с (Opus: майже нічого довше 8 с; його різи джерела теж падають посеред речень)
+  # v3.2: boundaries between words (even with no pause) as a fallback when there is neither a pause nor punctuation nearby:
+  # otherwise the shot sat for 9-12 s (Opus: almost nothing longer than 8 s; its source cuts also fall mid-sentence)
   wb_f = sorted({int(round(((WORDS_RAW[i - 1].get('e', WORDS_RAW[i - 1]['t'] + 0.2) + WORDS_RAW[i]['t']) / 2) * fps)) for i in range(1, len(WORDS_RAW))})
-  # solo: різ лише на межі речення (пунктуація або пауза >= 0.35 с), у радіусі 2.6 с; інакше різу немає
+  # solo: cut only at a sentence boundary (punctuation or a pause >= 0.35 s), within a 2.6 s radius; otherwise no cut
   sent_f = []
   for i in range(1, len(WORDS_RAW)):
       pw = WORDS_RAW[i - 1]; pe = pw.get('e', pw['t'] + 0.2)
@@ -536,13 +536,13 @@ if CACHED is None:
       f0, f1 = base_b[i], base_b[i + 1]
       L = (f1 - f0) / fps
       if L <= a.hold_max: continue
-      k = int(L // a.hold_max) + 1           # ділимо на рівні частини по ≤ hold_max
+      k = int(L // a.hold_max) + 1           # split into equal parts of <= hold_max
       for j in range(1, k):
           f = f0 + int(round((f1 - f0) * j / k))
           g = snap_any(f)
           if g and f0 + a.hold_min * fps < g < f1 - a.hold_min * fps and g <= TAIL_CUT: extra.append(g)
   bset |= set(extra)
-  if extra: print(f'власних різів у довгих планах: {len(extra)} (ракурс не тримаємо довше {a.hold_max:.0f} с)', flush=True)
+  if extra: print(f'own cuts in long shots: {len(extra)} (no angle is held longer than {a.hold_max:.0f} s)', flush=True)
   bnds = sorted(x for x in bset if 0 <= x <= n)
   segs = []
   for i in range(len(bnds) - 1):
@@ -561,15 +561,15 @@ if CACHED is None:
               g = snap_any(f)
               ok_ = lambda x: x and x > pts[-1] + a.min_seg * fps and x < f1 - a.min_seg * fps and x <= TAIL_CUT
               if ok_(g): pts.append(g)
-              # v3.5.8 (16.09): різ кадру — не різ звуку. Якщо межі слова поруч немає, а план утричі
-              # довший за hold-max, ріжемо все одно: 15 с на одному кадрі глядач помічає, різ — ні.
+              # v3.5.8 (16.09): a frame cut is not an audio cut. If there is no word boundary nearby and the shot is three times
+              # longer than hold-max, we cut anyway: the viewer notices 15 s on one frame, a cut they do not.
               elif (not PUNCH_SENTENCE) and L > 1.5 * a.hold_max and ok_(f): pts.append(f)
           pts.append(f1)
           for i2 in range(len(pts) - 1): out.append([pts[i2], pts[i2 + 1]])
       return out
-  # жодного сегмента коротшого за min_seg — але зливаємо ТІЛЬКИ в межах одного плану джерела (v3.3):
-  # кроп, що перетинає різ джерела, показує чужу камеру чужим кадруванням («загальний план, але обрізаний»).
-  # Короткий план без сусіда в тому ж плані лишається окремим сегментом зі своїм кадром.
+  # no segment shorter than min_seg, but merge ONLY within one source shot (v3.3):
+  # a crop that crosses a source cut shows another camera in another framing ("a wide shot, but cropped").
+  # A short shot without a neighbour in the same shot stays a separate segment with its own frame.
   locked = set()
   while len(segs) > 1:
       cands = [i for i in range(len(segs)) if (segs[i][1] - segs[i][0]) < a.min_seg * fps and tuple(segs[i]) not in locked]
@@ -579,9 +579,9 @@ if CACHED is None:
       left = k - 1 if k > 0 and shot_of(segs[k - 1][0]) == sh_k else None
       right = k + 1 if k + 1 < len(segs) and shot_of(segs[k + 1][0]) == sh_k else None
       if left is None and right is None:
-          # v3.5.5 (16.09): огризок < 1 с на краю кліпу або впритул до склейки — це блимання.
-          # Правило v3.3 (не зливати через різ джерела) тут програє: 0.7 с чужого кадрування
-          # глядач не помітить, а блиск на 0.7 с помітить обов'язково.
+          # v3.5.5 (16.09): a stub < 1 s at the clip edge or right next to a splice is flicker.
+          # The v3.3 rule (do not merge across a source cut) loses here: the viewer will not notice 0.7 s of another framing,
+          # but will definitely notice a 0.7 s flash.
           Lk = (segs[k][1] - segs[k][0]) / fps
           at_edge = (k == 0) or (k == len(segs) - 1) or (segs[k][0] in SPL_F) or (segs[k][1] in SPL_F)
           if Lk < 1.0 and at_edge and len(segs) > 1:
@@ -593,13 +593,13 @@ if CACHED is None:
           segs[left][1] = segs[k][1]; del segs[k]
       else:
           segs[right][0] = segs[k][0]; del segs[k]
-  segs = split_long(segs)                               # після злиття могли утворитись задовгі сегменти
+  segs = split_long(segs)                               # after merging, segments that are too long may have appeared
   if not segs: segs = [[0, n]]
   extra = set(extra) | {f0 for f0, f1 in segs}
-  # кадр кожного сегмента: медіанний бокс МОВЦЯ в межах сегмента; якщо мовця в кадрі нема — тримаємо
-  # попередній кадр (той самий план) або беремо найбільше обличчя
-  # v3.5.6 (16.09): збір боксів мовця в сегменті — винесено, щоб порахувати масштаб ДВІЧІ:
-  # спершу по всіх сегментах (щоб задати один зум на план джерела), потім уже кадри.
+  # frame of each segment: the median SPEAKER box within the segment; if the speaker is not in frame, keep
+  # the previous frame (same shot) or take the largest face
+  # v3.5.6 (16.09): collecting speaker boxes per segment is factored out so the scale is computed TWICE:
+  # first over all segments (to set one zoom per source shot), then the frames.
   def seg_boxes(f0, f1):
       per = {}
       for f in range(f0, min(n, f1)):
@@ -623,15 +623,15 @@ if CACHED is None:
               b = max(pl.values(), key=lambda v: v[1][2] * v[1][3])[1]
               bx.append((b[0] + b[2] / 2) * MINV); by.append((b[1] + b[3] / 2) * MINV); bh.append(b[3] * MINV)
       return bx, by, bh
-  ZOOM_FLOOR = 0.62      # як авто-MIN_CROP для 4K у ОПУС_ФРЕЙМВОРК: апскейл 1.4x, кадр як в Opus
+  ZOOM_FLOOR = 0.62      # like the auto MIN_CROP for 4K in OPUS_FRAMEWORK: 1.4x upscale, a frame like Opus
   def tch_for(fh_):
       t = min(H, max(MIN_CROP * H, fh_ / a.face_frac))
       if fh_ > 0 and fh_ / t < 0.17: t = min(H, max(ZOOM_FLOOR * H, fh_ / 0.17))
       return t
-  # ОДИН масштаб на план джерела: медіана висоти обличчя по всьому плану (зважена довжиною сегмента).
-  # Зум більше не «фліпає» між сусідніми сегментами всередині одного плану — саме це читалось як
-  # «камера приближається/віддаляється» (правка Маріка 06.09) — і водночас у довгому загальному
-  # плані спікер не лишається дрібним.
+  # ONE scale per source shot: the median face height over the whole shot (weighted by segment length).
+  # The zoom no longer "flips" between neighbouring segments inside one shot: that is what read as
+  # "the camera moving closer/away" (correction from 06.09), and at the same time in a long wide
+  # shot the speaker does not stay tiny.
   _shot_fh = {}
   for (f0, f1) in segs:
       _b = seg_boxes(f0, f1)[2]
@@ -640,29 +640,29 @@ if CACHED is None:
   SHOT_TCH = {}
   for _k, _v in _shot_fh.items():
       if not _v: continue
-      _t = tch_for(float(np.percentile(_v, 10)))     # орієнтир — найширший момент плану, а не середній
-      _t = max(_t, float(np.max(_v)) / 0.50)         # найбільше обличчя цього ж плану має влізти в кадр
+      _t = tch_for(float(np.percentile(_v, 10)))     # reference point: the widest moment of the shot, not the average
+      _t = max(_t, float(np.max(_v)) / 0.50)         # the largest face of the same shot must fit in the frame
       SHOT_TCH[_k] = float(min(H, _t))
   if _shot_fh:
-      print('масштаб планів: ' + ' | '.join(
-          f"{shots[k][0]/fps:.1f}-{shots[k][1]/fps:.1f}с p10={np.percentile(v,10)/H:.0%} max={np.max(v)/H:.0%} кроп={SHOT_TCH[k]:.0f}"
+      print('shot scale: ' + ' | '.join(
+          f"{shots[k][0]/fps:.1f}-{shots[k][1]/fps:.1f}s p10={np.percentile(v,10)/H:.0%} max={np.max(v)/H:.0%} crop={SHOT_TCH[k]:.0f}"
           for k, v in sorted(_shot_fh.items()) if k in SHOT_TCH), flush=True)
   CROPS = []; prev_crop = None; prev_punch = False; SEG_FH = []
   for (f0, f1) in segs:
-      # v2.2: обираємо обличчя за оцінкою ASD усередині сегмента — це надійніше, ніж «персона-мовець»
-      # (у загальному плані обличчя дрібне, ембеддинг може дати іншу персону, і кадр їхав не на того)
+      # v2.2: pick the face by the ASD score inside the segment: more reliable than "the speaker person"
+      # (in a wide shot the face is small, the embedding can give another person, and the frame went to the wrong one)
       bx, by, bh = seg_boxes(f0, f1)
       if not bx:
           CROPS.append(prev_crop if prev_crop else (W / 2, H / 2, H, 1.0)); SEG_FH.append(SEG_FH[-1] if SEG_FH else 1.0); continue
       fh_ = float(np.median(bh)); SEG_FH.append(fh_ / H)
-      tch = SHOT_TCH.get(shot_of(f0)) or tch_for(fh_)   # v3.5.6: один масштаб на план джерела
+      tch = SHOT_TCH.get(shot_of(f0)) or tch_for(fh_)   # v3.5.6: one scale per source shot
       cx_ = float(np.median(bx)); cy_ = float(np.median(by)) + a.face_y * tch
-      # v2.2: якщо кадр майже не змінився проти попереднього сегмента (склейка або власний різ у тому самому
-      # плані) — чергуємо «звичайний ↔ підріз», щоб різ читався як монтажний, а не як глюк/сіпання
+      # v2.2: if the frame barely changed compared to the previous segment (a splice or an own cut in the same
+      # shot), alternate "normal <-> punch-in" so that the cut reads as editing, not as a glitch/twitch
       same_as_prev = prev_crop and abs(cx_ - prev_crop[0]) < 0.06 * W and abs(tch - prev_crop[2]) < 0.08 * H
-      # v3.5.7 (16.09): на спокійному профілі (--punch 1.0) чергування вимкнене повністю.
-      # Раніше гілка «підрізу» все одно піднімала кроп до MIN_CROP*H*0.80 = 1728 px і
-      # перебивала дозум на широкому плані — обличчя лишалось дрібним.
+      # v3.5.7 (16.09): on the calm profile (--punch 1.0) the alternation is fully off.
+      # Before, the punch-in branch still raised the crop to MIN_CROP*H*0.80 = 1728 px and
+      # overrode the zoom on a wide shot, so the face stayed small.
       if a.punch != 1.0 and same_as_prev and (f0 in SPL_F or f0 in extra):
           if prev_punch: tch = min(H, tch / a.punch)
           else: tch = max(MIN_CROP * H * 0.80, tch * a.punch)
@@ -671,10 +671,10 @@ if CACHED is None:
       elif not same_as_prev:
           prev_punch = False
       CROPS.append((cx_, cy_, tch, 1.0)); prev_crop = CROPS[-1]
-  # v3.0: 1–3 виходи на кадр-смугу (розмитий верх/низ) — так робить Opus (10 % часу, 1.5–4.5 с за раз).
-  # v3.1: в Opus смуга — це ШИРОКИЙ план джерела (обличчя дрібні, кроп не має сенсу), тож кандидати —
-  # передусім широкі плани (обличчя мовця < band-wide висоти), серед них — де видима людина мовчить (слухає);
-  # у фіналі кліпу — лише якщо фінальний план широкий (крупний план у смузі не читається як «вихід на загальний»).
+  # v3.0: 1-3 trips to a band frame (blurred top/bottom): that is what Opus does (10 % of the time, 1.5-4.5 s each).
+  # v3.1: in Opus a band is a WIDE source shot (faces small, a crop makes no sense), so the candidates are
+  # first of all wide shots (speaker face < band-wide of the height), among them those where the visible person is silent (listening);
+  # at the end of the clip only if the final shot is wide (a close-up in a band does not read as a "cut to the wide").
   BAND_SEGS = set()
   if a.band > 0 and len(segs) > 2:
       cand = []
@@ -691,29 +691,29 @@ if CACHED is None:
       chosen = []
       last_wide = (SEG_FH[-1] if SEG_FH else 1.0) < a.band_wide
       if a.band_end and len(segs) >= 2 and last_wide: chosen.append(len(segs) - 1)
-      # v3.5.10 (16.09): сегмент, що впирається у склейку, у кандидати не беремо — смуга там
-      # дає подвійний стик (зміна кадру + зміна сцени) і читається як стрибок.
+      # v3.5.10 (16.09): a segment that runs into a splice is not a candidate: a band there
+      # gives a double join (frame change + scene change) and reads as a jump.
       def _at_splice(k3):
           t0_, t1_ = segs[k3][0] / fps, segs[k3][1] / fps
           return any(abs(t1_ - sp) < 0.8 or abs(t0_ - sp) < 0.8 for sp in SPL)
       rest = [c for c in cand if c[0] not in chosen and 0 < c[0] < len(segs) - 1 and not _at_splice(c[0])]
-      rest.sort(key=lambda c: (not c[3], c[2]))              # спершу широкі плани, серед них — найтихіші
+      rest.sort(key=lambda c: (not c[3], c[2]))              # wide shots first, among them the quietest
       wide_rest = [c for c in rest if c[3]]
-      pool = wide_rest if wide_rest else rest                # немає жодного широкого плану — беремо найтихіші
-      for c in pool:                                         # v3.2: сусідні сегменти не беремо — інакше дві смуги зливаються в одну на 7–9 с
+      pool = wide_rest if wide_rest else rest                # no wide shot at all: take the quietest
+      for c in pool:                                         # v3.2: neighbouring segments are not taken, otherwise two bands merge into one of 7-9 s
           if len(chosen) >= a.band: break
           if any(abs(c[0] - k3) <= 1 for k3 in chosen): continue
           chosen.append(c[0])
-      if not last_wide and a.band_end: print('фінальний план крупний — смуги у фіналі не буде', flush=True)
-      # смуга живе рівно band-len секунд усередині сегмента (референс Opus: 1.5–4.5 с), а не весь сегмент
+      if not last_wide and a.band_end: print('final shot is a close-up: no band at the end', flush=True)
+      # a band lives exactly band-len seconds inside a segment (Opus reference: 1.5-4.5 s), not the whole segment
       L2 = int(round(a.band_len * fps))
       for k2 in chosen:
           f0, f1 = segs[k2]
           if (f1 - f0) - L2 < a.min_seg * fps:
-              BAND_SEGS.add((f0, f1))                                  # сегмент і так короткий — увесь на смугу
+              BAND_SEGS.add((f0, f1))                                  # the segment is short anyway: all of it goes to the band
           else:
-              BAND_SEGS.add((f1 - L2, f1))                             # смуга впирається в наступний різ, недогризків не лишає
-      if BAND_SEGS: print('кадр-смуга (розмитий верх/низ): ' + ', '.join(f'{x/fps:.1f}-{y/fps:.1f} с' for x, y in sorted(BAND_SEGS)), flush=True)
+              BAND_SEGS.add((f1 - L2, f1))                             # the band runs into the next cut, no stubs left
+      if BAND_SEGS: print('band shots (blurred top/bottom): ' + ', '.join(f'{x/fps:.1f}-{y/fps:.1f} s' for x, y in sorted(BAND_SEGS)), flush=True)
   path = []
   si = 0
   for i in range(n):
@@ -726,14 +726,14 @@ if CACHED is None:
       cx_, cy_, ch_, pl_ = CROPS[si]; cw_ = ch_ * 9 / 16
       path.append(['SPEAKER', min(max(cx_, cw_ / 2), W - cw_ / 2), min(max(cy_, ch_ / 2), H - ch_ / 2), ch_, pl_])
   nsw = sum(1 for i in range(1, len(segs)))
-  print(f'сегментів кадру: {len(segs)} ({len(segs)/(n/fps)*60:.1f}/хв) — межі: різи джерела + зміна мовця + склейки', flush=True)
+  print(f'frame segments: {len(segs)} ({len(segs)/(n/fps)*60:.1f}/min), boundaries: source cuts + speaker change + splices', flush=True)
   print(f'faces: tracks={next_id} frames={n} crop={CW}x{H} min-crop={MIN_CROP:.2f}', flush=True)
   if a.path_json: json.dump({'n': n, 'path': path, 'fps': fps, 'W': W, 'H': H, 'CW': CW, 'src_cuts': [round(c / fps, 2) for c in CUTS]}, open(a.path_json, 'w'))
   if a.path_only: sys.exit(0)
 
 # ---------------- captions (same style as render_blurfit_tc.py) ----------------
 WORDS = json.load(open(a.words, encoding='utf-8'))
-# v1.5: чистка субтитрів — маркери спікера >>, теги [сміх]/[сопіння], чисті філери (е, ее, м), артефакти авто-субтитрів («до$» = доларів)
+# v1.5: subtitle cleanup: speaker markers >>, tags like [laughter]/[sniffing], pure fillers (e, ee, m), auto-subtitle artifacts ("до$" = dollars)
 import re as _re
 _FILL = {'е', 'ее', 'еее', 'е-е', 'м', 'мм', 'ем', 'а-а', 'ээ', 'э'}
 def _clean(t):
@@ -748,7 +748,7 @@ for w in WORDS:
     w = dict(w); w['w'] = t; _out.append(w)
 WORDS = [w for w in _out if w['w'].strip()]
 if WORDS and WORDS[-1].get('e', 0) > n / fps + 0.5:
-    print(f"!!! УВАГА: субтитри до {WORDS[-1]['e']:.1f} с, а відео лише {n/fps:.1f} с — кліп обрізано, кінець думки втрачено", flush=True)
+    print(f"!!! WARNING: subtitles run to {WORDS[-1]['e']:.1f} s but the video is only {n/fps:.1f} s: the clip is cut short, the end of the thought is lost", flush=True)
 for i in range(len(WORDS)):
     if WORDS[i]['t'] < 0: WORDS[i]['t'] = 0.0
     if i > 0 and WORDS[i]['t'] < WORDS[i - 1]['t']: WORDS[i]['t'] = WORDS[i - 1]['t']
@@ -765,13 +765,13 @@ for i in range(len(LINES)):
     e_ = LINES[i][-1]['e']
     if i + 1 < len(LINES):
         nt = LINES[i + 1][0]['t']
-        LEND.append(nt if nt - e_ < 1.0 else e_ + a.cap_hold)   # v3.1: у довгій паузі підпис зникає, а не висить до наступної фрази
+        LEND.append(nt if nt - e_ < 1.0 else e_ + a.cap_hold)   # v3.1: in a long pause the caption disappears instead of hanging until the next phrase
     else: LEND.append(e_ + 0.35)
 MAXW = 940; ROW = int(a.font_max * 1.20); FCACHE = {}
 def gf(sz):
     if sz not in FCACHE:
         f = ImageFont.truetype(a.font, sz)
-        for _v in (a.weight, 'Bold'):                      # v3.1: ExtraBold як в Opus; якщо в шрифті нема — Bold
+        for _v in (a.weight, 'Bold'):                      # v3.1: ExtraBold as in Opus; if the font has no such instance, Bold
             try: f.set_variation_by_name(_v); break
             except Exception: continue
         FCACHE[sz] = f
@@ -867,7 +867,7 @@ subprocess.run(['ffmpeg', '-y', '-i', a.raw, '-ss', f'{FA / fps:.4f}', '-t', f'{
 vout = subprocess.Popen(['ffmpeg', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', f'{OW}x{OH}', '-r', str(fps),
                          '-i', '-', '-i', au, '-c:v', 'libx264', '-preset', 'medium', '-crf', str(a.crf), '-pix_fmt', 'yuv420p', '-c:a', 'alac', '-shortest', a.out, '-loglevel', 'error'], stdin=subprocess.PIPE)
 SHARP = a.sharpen if a.sharpen >= 0 else (0.35 if OH > H else 0.0)
-WIDE_Y = 0.42     # центр смуги широкого плану (Opus ставить її трохи вище центру, підписи — під нею)
+WIDE_Y = 0.42     # center of the wide-shot band (Opus puts it slightly above center, captions below it)
 ot = FA / fps; fi = 0
 while fi < FA:
     if not cap.grab(): break

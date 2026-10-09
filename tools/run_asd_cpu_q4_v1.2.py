@@ -1,8 +1,8 @@
-"""run_asd_cpu_q4_v1.2.py — ASD (active speaker detection, хто говорить) на CPU. Основа: Light-ASD.
-v1.2 (19.09): кроп трек за треком з пропуском готових, пад лише за край; v1.1 (16.09): чекпойнт детекції облич.
-Бюджет часу на виклик: ASD_BUDGET (с), за замовчуванням 70.
-Вихід у --save: pywork/{tracks.pckl,scores.pckl,faces.pckl}, pyavi/video.avi (25fps).
-Запускати всередині клонованого репозиторію Light-ASD (щоб import ASD працював)."""
+"""run_asd_cpu_q4_v1.2.py - ASD (active speaker detection, who is speaking) on CPU. Based on Light-ASD.
+v1.2 (19.09): crop track by track, skipping finished ones, pad only past the edge; v1.1 (16.09): face-detection checkpoint.
+Time budget per call: ASD_BUDGET (s), default 70.
+Output in --save: pywork/{tracks.pckl,scores.pckl,faces.pckl}, pyavi/video.avi (25fps).
+Run inside the cloned Light-ASD repository (so that import ASD works)."""
 import sys, os, glob, pickle, subprocess, math, argparse
 import numpy as np, cv2
 from scipy import signal
@@ -11,7 +11,7 @@ from scipy.interpolate import interp1d
 import python_speech_features
 ap=argparse.ArgumentParser()
 ap.add_argument('--src',required=True); ap.add_argument('--start',type=float,default=0)
-ap.add_argument('--dur',type=float,default=0)  # 0 = весь файл
+ap.add_argument('--dur',type=float,default=0)  # 0 = whole file
 ap.add_argument('--save',required=True)
 ap.add_argument('--weight',default='weight/pretrain_AVA_CVPR.model'); ap.add_argument('--yunet',default='yunet.onnx')
 ap.add_argument('--minTrack',type=int,default=10); ap.add_argument('--numFailedDet',type=int,default=10)
@@ -32,7 +32,7 @@ if len(glob.glob(os.path.join(pyframes,'*.jpg')))==0:
 flist=sorted(glob.glob(os.path.join(pyframes,'*.jpg'))); print('frames:',len(flist),flush=True)
 facesP=os.path.join(pywork,'faces.pckl')
 if not os.path.isfile(facesP):
-    # v1.1 (16.09): чекпойнт детекції — довгі кліпи не встигають за один виклик (ліміт 120 с)
+    # v1.1 (16.09): face-detection checkpoint: long clips do not finish in one call (limit 120 s)
     partP=os.path.join(pywork,'faces.part')
     dets=pickle.load(open(partP,'rb')) if os.path.isfile(partP) else []
     det=cv2.FaceDetectorYN.create(a.yunet,'',(320,320),0.6,0.3,5000)
@@ -79,7 +79,7 @@ def track_shot(sf):
     return tracks
 tracksP=os.path.join(pywork,'tracks.pckl')
 if not os.path.isfile(tracksP):
-    # v1.2 (19.09): кроп трек за треком з пропуском готових (.avi) — резюмується між викликами; пад кадру один раз на трек-кадр
+    # v1.2 (19.09): crop track by track, skipping finished ones (.avi), resumable between calls; frame pad once per track frame
     import time as _t; _t0=_t.time(); _lim=float(os.environ.get('ASD_BUDGET', os.environ.get('DET_BUDGET','70')))
     allT=track_shot([list(f) for f in dets]); print('tracks:',len(allT),flush=True); vid=[]
     procs=[]
@@ -101,7 +101,7 @@ if not os.path.isfile(tracksP):
             img0=cv2.imread(flist[int(frame)]); h0,w0=img0.shape[:2]
             my=d['y'][fidx]; mx=d['x'][fidx]
             y0=int(my-bs); y1=int(my+bs*(1+2*cs)); x0=int(mx-bs*(1+cs)); x1=int(mx+bs*(1+cs))
-            # пад лише на стільки, скільки виходить за край (замість np.pad усього 1440p-кадру)
+            # pad only as much as extends past the edge (instead of np.pad on the whole 1440p frame)
             py0=max(0,-y0); px0=max(0,-x0); py1=max(0,y1-h0); px1=max(0,x1-w0)
             face=img0[max(0,y0):min(h0,y1), max(0,x0):min(w0,x1)]
             if py0 or px0 or py1 or px1: face=cv2.copyMakeBorder(face,py0,py1,px0,px1,cv2.BORDER_CONSTANT,value=(110,110,110))
@@ -145,7 +145,7 @@ if not os.path.isfile(scoresP):
             allScore.append(sc)
         ml=min(len(z) for z in allScore); sc=np.round(np.mean(np.array([z[:ml] for z in allScore]),axis=0),1).astype(float)
         np.save(cP,sc); done+=1; print('scored',fn,'len',len(sc),flush=True)
-        if _t.time()-_t0>_lim and done<len(files): print('progress',done,'/',len(files),'(бюджет)',flush=True); print('DONE',a.save,flush=True); raise SystemExit
+        if _t.time()-_t0>_lim and done<len(files): print('progress',done,'/',len(files),'(budget)',flush=True); print('DONE',a.save,flush=True); raise SystemExit
     if done==len(files):
         allScores=[np.load(os.path.join(pywork,'score_'+os.path.splitext(os.path.basename(f))[0]+'.npy')) for f in files]
         pickle.dump(allScores,open(scoresP,'wb')); print('ASD scores saved, tracks=',len(files),flush=True)

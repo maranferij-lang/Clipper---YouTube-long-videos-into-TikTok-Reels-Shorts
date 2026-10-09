@@ -1,27 +1,27 @@
 """
-opus_scorer_v22.py — перший прохід відбору моментів (рубрика docs/selection-standard.md v2.2, вересень 2026).
+opus_scorer_v22.py - first pass of moment selection (rubric docs/selection-standard.md v2.2, September 2026).
 
-Що нового проти v2 (калібрування на 154 шортсах редакції «Що з економікою?», 57 випусків, 03.09.2026):
-  • Cold-open скасовано (selection-standard v2.1): найцитованіший рядок дає бал як «панчлайн є», а не як старт.
-    У редакції він стоїть у середньому на 30 % довжини кліпу (≈15 с від старту), на старті — лише у 18 %.
-  • Старт = перше змістовне слово, а не початок речення: редакція ріже лід-ін (філери, «я думаю, що»,
-    «ну дивіться», «у нас») — медіана 3 слова, 76 % стартів усередині речення. lead_trim до 8 слів.
-  • Тест предмета (перші 6 слів: іменник/число/питання) — +4 / −6 у Hook (тест контексту docs/selection-standard.md).
-  • Довжина: пік 50 с (референс: медіана 51, p25–p75 = 41–63), понад --softmax 80 с — штраф.
-  • Зміна спікера (маркер >> в авто-субтитрах YouTube): ≥ 2 зміни всередині кліпу — штраф у Flow
-    (у редакції один спікер; ведучий — лише сетап-питанням).
-  • --teaser N: перші N секунд випуску (тизер-монтаж) не беремо в кандидати.
+What is new compared to v2 (calibrated on 154 shorts of the "Що з економікою?" editorial team, 57 episodes, 03.09.2026):
+  * Cold-open dropped (selection-standard v2.1): the most quoted line scores as "punchline present", not as a start.
+    In the editors' clips it sits on average at 30 % of the clip length (~15 s from the start), at the start only in 18 %.
+  * Start = the first meaningful word, not the start of the sentence: the editors cut the lead-in (fillers, "I think that",
+    "well, look", "we have"): median 3 words, 76 % of starts are mid-sentence. lead_trim up to 8 words.
+  * Subject test (first 6 words: noun/number/question): +4 / -6 in Hook (the context test of docs/selection-standard.md).
+  * Length: peak 50 s (reference: median 51, p25-p75 = 41-63), beyond --softmax 80 s a penalty.
+  * Speaker change (marker >> in YouTube auto-subtitles): >= 2 changes inside a clip is a penalty in Flow
+    (the editors use one speaker; the host only asks the setup question).
+  * --teaser N: the first N seconds of the episode (teaser montage) are not taken as candidates.
 
-Вхід: words.json — [{"w":слово,"t":старт_с[,"e":кінець_с]}, ...] (Whisper або YouTube-авто-субтитри з пунктуацією).
-Запуск:
+Input: words.json - [{"w":word,"t":start_s[,"e":end_s]}, ...] (Whisper or YouTube auto-subtitles with punctuation).
+Usage:
   python opus_scorer_v22.py words.json --top 40 --teaser 60 --out cands_v22.json --md cands_v22.md
-Це ПЕРШИЙ прохід (тріаж). Фінальний відбір і межі — за людиною по docs/selection-standard.md.
+This is the FIRST pass (triage). The final selection and boundaries are up to a human, per docs/selection-standard.md.
 
-Калібрування на референсі (перекриття ≥ 40 % їхнього кліпу; «центр» = центр мого кліпа всередині їхнього):
-  v2   топ-30: 76 % шортсів (85 % за переглядами) | довжина мій/їхній 1.46 | центр@30 60 %
-  v2.2 топ-30: 62 % (64 %)  топ-40: 78 % (86 %)  | довжина 1.08 | центр@30 58 %  → дефолт --top 40
-  Тобто моменти знаходимо однаково, вікна стали правильної довжини; лексика НЕ передбачає вибір редакції
-  (логістична регресія по всіх під-балах: +2 п.п. recall) — вибір моменту робить людина/Claude за змістом.
+Calibration against the reference (overlap >= 40 % of their clip; "center" = the center of my clip inside theirs):
+  v2   top-30: 76 % of shorts (85 % by views) | length mine/theirs 1.46 | center@30 60 %
+  v2.2 top-30: 62 % (64 %)  top-40: 78 % (86 %)  | length 1.08 | center@30 58 %  -> default --top 40
+  So we find the same moments, and the windows now have the right length; the lexicon does NOT predict the editors' choice
+  (logistic regression over all sub-scores: +2 pp recall), so the choice of a moment is made by a human/Claude based on meaning.
 """
 import sys, json, re, argparse, math
 
@@ -31,7 +31,7 @@ ap.add_argument('--min', type=float, default=40)
 ap.add_argument('--max', type=float, default=120)
 ap.add_argument('--peak', type=float, default=50)
 ap.add_argument('--softmax', type=float, default=80)
-ap.add_argument('--teaser', type=float, default=0)   # перші N с випуску = тизер-монтаж, кандидатів там не будуємо   # понад це — штраф у Flow (референс: p75 = 63 с, макс 101)
+ap.add_argument('--teaser', type=float, default=0)   # first N s of the episode = teaser montage, no candidates are built there   # beyond this, a penalty in Flow (reference: p75 = 63 s, max 101)
 ap.add_argument('--top', type=int, default=40)
 ap.add_argument('--out', default='cands_v22.json')
 ap.add_argument('--md', default='')
@@ -53,7 +53,7 @@ for i, w in enumerate(W):
     if w['e'] <= w['t']:
         w['e'] = w['t'] + 0.12
 
-# ---------------- лексикони за ОСНОВАМИ слів (укр + трохи рос.) ----------------
+# ---------------- lexicons by word STEMS (Ukrainian + a bit of Russian) ----------------
 def ST(txt): return tuple(sorted(set(txt.split())))
 CONTRARIAN = ST("""насправді неправд міф брехн ніхто ніде ніколи навпаки неможлив помилк помиля дарма
 ілюз парадокс по-справжньому никто нигде никогда наоборот миф лож""")
@@ -98,7 +98,7 @@ def norm(t): return t.lower().strip(_STRIP)
 def has(tok, stems): return any(tok.startswith(s) for s in stems)
 def count(toks, stems): return sum(1 for t in toks if has(t, stems))
 
-# ---------------- речення ----------------
+# ---------------- sentences ----------------
 sents, cur = [], []
 for i, w in enumerate(W):
     cur.append(i)
@@ -109,7 +109,7 @@ for i, w in enumerate(W):
                       'text': text, 'nwords': len(cur)})
         cur = []
 if not sents:
-    print('нема речень'); sys.exit(0)
+    print('no sentences'); sys.exit(0)
 
 def toks_of(text):
     return [norm(t) for t in text.split() if norm(t)]
@@ -173,7 +173,7 @@ def agg(si, sj):
         trs |= sents[k]['tr_set']
     return F, trs
 
-# ---------------- кандидати навколо якорів ----------------
+# ---------------- candidates around anchors ----------------
 def clamp(x, lo, hi): return max(lo, min(hi, x))
 
 LEAD = WEAK_START | frozenset(FILLER) | frozenset("""да так от ну а і але тобто короче ось ее еее ем взагалі насправді навіть
@@ -182,10 +182,10 @@ LEAD = WEAK_START | frozenset(FILLER) | frozenset("""да так от ну а і
 LEAD_PHRASES = ('я думаю', 'я вважаю', 'мені здається', 'на мою думку', 'чесно кажучи', 'скажімо так', 'умовно кажучи',
                 'я вам скажу', 'я б сказав', 'я би сказала', 'хочу сказати', 'можна сказати', 'так би мовити', 'у нас', 'в нас')
 def lead_trim(si):
-    """v2.2: старт = перше змістовне слово (референс: редакція ріже лід-ін, медіана 3 слова, до 8);
-    зрізаємо філери/сполучники/хеджі («я думаю, що», «ну дивіться», «у нас») — але лишаємо ≥ 4 слова речення"""
+    """v2.2: start = the first meaningful word (reference: the editors cut the lead-in, median 3 words, up to 8);
+    trim fillers/conjunctions/hedges ("I think that", "well, look", "we have") but keep >= 4 words of the sentence"""
     s0 = sents[si]; k = s0['i0']; n = 0
-    if s0['text'].rstrip()[-1:] == '?' or norm(W[k]['w']) in QUESTION_W: return k   # питання лишаємо цілим
+    if s0['text'].rstrip()[-1:] == '?' or norm(W[k]['w']) in QUESTION_W: return k   # keep a question whole
     while n < 8 and (s0['i1'] - k) >= 4:
         two = (norm(W[k]['w']) + ' ' + norm(W[k + 1]['w'])) if k + 1 <= s0['i1'] else ''
         if two in LEAD_PHRASES:
@@ -207,22 +207,22 @@ def score(c):
     ws0 = c['text'].split(); first_tok = norm(ws0[0]) if ws0 else ''
     head = ' '.join(ws0[:12]); fh = sent_feats(head)
     A = sents[c['anchor']]
-    # --- HOOK: зона перших 12 слів + якірне речення (якщо воно на старті або в перші 8 с)
+    # --- HOOK: zone of the first 12 words + the anchor sentence (if it is at the start or in the first 8 s)
     h = 5
     h += min(14, 8 * (1 if fh['contr'] else 0) + 6 * (1 if fh['q'] else 0) + 6 * min(fh['nums'], 1)
              + 4 * (1 if fh['direct'] else 0) + 5 * (1 if fh['story'] else 0) + 4 * (1 if fh['emo_n'] else 0)
              + 3 * (1 if fh['super'] else 0) + 3 * (1 if fh['howto'] else 0))
     anchor_delay = A['t'] - c['t']
-    # v2.2: найцитованіший рядок може бути будь-де (референс: медіана позиції 0.3, лише 18 % — на старті);
-    # він дає бал як «панчлайн є», а не як «cold-open»
+    # v2.2: the most quoted line can be anywhere (reference: median position 0.3, only 18 % at the start);
+    # it scores as "punchline present", not as "cold-open"
     h += min(7, max(0, A['q'] * 0.7))
-    # тест предмета (selection-standard v2.1 «тест контексту»): у перших 6 словах — змістовне слово, число або питання
+    # subject test (selection-standard v2.1 "context test"): the first 6 words contain a meaningful word, a number or a question
     subj = any((len(t) >= 5 and t not in LEAD and t not in FILLER) or t[:1].isdigit() or t in QUESTION_W or has(t, TREND)
                for t in [norm(x) for x in ws0[:6]])
     h += 4 if subj else -6
     if first_tok in WEAK_START: h -= 8
     fw = ws0[0] if ws0 else ''
-    if S0['nwords'] < 4 or fw[:1].isdigit(): h -= 6   # уламок / старт із числа
+    if S0['nwords'] < 4 or fw[:1].isdigit(): h -= 6   # fragment / start with a number
     if S0['nwords'] > 28: h -= 3
     hook = clamp(h, 0, 25)
     # --- FLOW
@@ -232,19 +232,19 @@ def score(c):
     if first_tok in WEAK_START: fl -= 4
     dd = c['dur']
     fl += 4 * math.exp(-((dd - a.peak) ** 2) / (2 * 20 ** 2)) - 1
-    if dd > a.softmax: fl -= min(8, 0.5 * (dd - a.softmax))      # референс: 40–65 с ядро, довше — лише повна історія
+    if dd > a.softmax: fl -= min(8, 0.5 * (dd - a.softmax))      # reference: 40-65 s core, longer only a full story
     if dd < a.min: fl -= 6
     nsc = sum(1 for i in range(c['k0'], sents[c['sj']]['i1'] + 1) if W[i].get('sc'))
-    if nsc >= 2: fl -= 2 * (nsc - 1)                              # референс: один спікер; ведучий — лише сетап-питання
+    if nsc >= 2: fl -= 2 * (nsc - 1)                              # reference: one speaker; the host only asks the setup question
     if c['nwords'] < 30: fl -= 6
     wps = c['nwords'] / max(1, dd)
     if 2.0 <= wps <= 3.6: fl += 2
     elif wps < 1.5: fl -= 3
-    # завершеність: останнє речення не має бути питанням ведучого (обрив на питанні)
+    # completeness: the last sentence must not be a host question (a break on a question)
     last = sents[c['sj']]
     if last['text'].rstrip()[-1:] == '?' and last['nwords'] > 6: fl -= 5
     flow = clamp(fl, 0, 25)
-    # --- VALUE (факт + інсайт + емоція), щільність на 100 слів
+    # --- VALUE (fact + insight + emotion), density per 100 words
     per100 = 100.0 / max(30, c['nwords'])
     v = 4 + min(6, 1.2 * F['val'] * per100) + min(7, 1.6 * F['nums'] * per100) + min(3, 0.8 * F['caps'] * per100) \
         + min(8, 2.6 * F['emo_n'] * per100) + min(2, 1.0 * F['outcome'] * per100)
@@ -255,13 +255,13 @@ def score(c):
     trend = clamp(t, 0, 25)
     total = hook + flow + value + trend
     emo_cls = max(F['emo'].items(), key=lambda kv: kv[1])
-    restructure = None   # v2.1: cold-open не робимо; найцитованіший рядок лишається на своєму місці (див. anchor_t)
+    restructure = None   # v2.1: no cold-open; the most quoted line stays in place (see anchor_t)
     return dict(total=round(total), hook=round(hook), flow=round(flow), value=round(value), trend=round(trend),
                 types=(A['types'] or hook_types(fh)), emotion=(emo_cls[0] if emo_cls[1] > 0 else '—'),
                 anchor_line=A['text'], anchor_t=round(A['t'], 2), anchor_q=round(A['q'], 1), wps=round(wps, 2),
                 restructure=restructure)
 
-# (a) якірні вікна: старт = цитований рядок (або коротке речення-сетап перед ним)
+# (a) anchor windows: start = the quoted line (or a short setup sentence before it)
 anchors = [s for s in sents if s['q'] >= 3.0 and s['nwords'] >= 4]
 seen = set(); cands = []
 def add(si, sj, ai):
@@ -274,7 +274,7 @@ def ends_from(si, ai):
         if dur > a.max + 10: break
         if dur < a.min - 4: continue
         if sents[sj]['text'].rstrip()[-1:] not in TERM: continue
-        if sj > si and (sents[sj]['t'] - sents[sj - 1]['e']) > 4.0: break   # велика пауза = кінець теми
+        if sj > si and (sents[sj]['t'] - sents[sj - 1]['e']) > 4.0: break   # a long pause = end of the topic
         yield sj
 for A in anchors:
     ai = A['idx']; starts = [ai]
@@ -282,14 +282,14 @@ for A in anchors:
         starts.append(ai - 1)
     for si in starts:
         for sj in ends_from(si, ai): add(si, sj, ai)
-# (b) повний перебір (як у v1): будь-яке речення-старт, якір = найцитованіше речення всередині вікна
+# (b) full enumeration (as in v1): any sentence as a start, anchor = the most quoted sentence inside the window
 for si in range(len(sents)):
     if sents[si]['nwords'] < 4: continue
     for sj in ends_from(si, si):
         ai = max(range(si, sj + 1), key=lambda k: sents[k]['q'])
         add(si, sj, ai)
 if not cands:
-    print('нема кандидатів'); sys.exit(0)
+    print('no candidates'); sys.exit(0)
 
 cands.sort(key=lambda c: (-c['total'], c['t']))
 chosen = []
@@ -300,21 +300,21 @@ for c in cands:
     if len(chosen) >= a.top: break
 
 def mmss(s): return f'{int(s // 60):02d}:{int(s % 60):02d}'
-print(f'\n=== ТОП-{len(chosen)} КАНДИДАТІВ (рубрика v2.2: предмет → історія → панчлайн) ===\n')
+print(f'\n=== TOP-{len(chosen)} CANDIDATES (rubric v2.2: subject -> story -> punchline) ===\n')
 for r, c in enumerate(chosen, 1):
-    print(f"{r:2d}. {c['total']:3d}/100  [{mmss(c['t'])}–{mmss(c['e'])}] {c['dur']:.0f}с  H{c['hook']} F{c['flow']} V{c['value']} T{c['trend']}  "
-          f"тип: {', '.join(c['types']) or '—'} | емоція: {c['emotion']} | {c['wps']} сл/с")
-    print(f"    якір @{mmss(c['anchor_t'])} (q={c['anchor_q']}): «{' '.join(c['anchor_line'].split()[:16])}…»")
-    print(f"    старт: «{' '.join(c['text'].split()[:12])}…»")
-    if c['restructure']: print(f"    ⟵ RESTRUCTURE: cold-open з {mmss(c['restructure']['t'])} (q={c['restructure']['q']})")
+    print(f"{r:2d}. {c['total']:3d}/100  [{mmss(c['t'])}–{mmss(c['e'])}] {c['dur']:.0f}s  H{c['hook']} F{c['flow']} V{c['value']} T{c['trend']}  "
+          f"type: {', '.join(c['types']) or '—'} | emotion: {c['emotion']} | {c['wps']} w/s")
+    print(f"    anchor @{mmss(c['anchor_t'])} (q={c['anchor_q']}): «{' '.join(c['anchor_line'].split()[:16])}…»")
+    print(f"    start: «{' '.join(c['text'].split()[:12])}…»")
+    if c['restructure']: print(f"    ⟵ RESTRUCTURE: cold-open from {mmss(c['restructure']['t'])} (q={c['restructure']['q']})")
     print()
 keep = ('total', 'hook', 'flow', 'value', 'trend', 't', 'e', 'dur', 'nwords', 'types', 'emotion', 'anchor_line', 'anchor_t', 'anchor_q', 'restructure', 'wps', 'text')
 with open(a.out, 'w', encoding='utf-8') as fp:
     json.dump([{k: c[k] for k in keep} for c in chosen], fp, ensure_ascii=False, indent=1)
-print('→ збережено', a.out)
+print('-> saved', a.out)
 if a.md:
-    L = ['| # | Бал | H | F | V | T | Межі | Довж | Тип хука | Емоція | Якір (хук) |', '|---|---|---|---|---|---|---|---|---|---|---|']
+    L = ['| # | Score | H | F | V | T | Bounds | Dur | Hook type | Emotion | Anchor (hook) |', '|---|---|---|---|---|---|---|---|---|---|---|']
     for r, c in enumerate(chosen, 1):
-        L.append(f"| {r} | **{c['total']}** | {c['hook']} | {c['flow']} | {c['value']} | {c['trend']} | {mmss(c['t'])}–{mmss(c['e'])} | {c['dur']:.0f} с | {', '.join(c['types']) or '—'} | {c['emotion']} | {mmss(c['anchor_t'])} «{' '.join(c['anchor_line'].split()[:12])}…» |")
+        L.append(f"| {r} | **{c['total']}** | {c['hook']} | {c['flow']} | {c['value']} | {c['trend']} | {mmss(c['t'])}–{mmss(c['e'])} | {c['dur']:.0f} s | {', '.join(c['types']) or '—'} | {c['emotion']} | {mmss(c['anchor_t'])} «{' '.join(c['anchor_line'].split()[:12])}…» |")
     open(a.md, 'w', encoding='utf-8').write('\n'.join(L))
-    print('→ збережено', a.md)
+    print('-> saved', a.md)

@@ -7,7 +7,7 @@ export PATH="$HOME/.local/bin:$PATH" PYTHONPATH="$HOME/Light-ASD"
 T="$(cd "$(dirname "$0")" && pwd)"
 while true; do
   OUT=$(python3 "$T/pipeline_v3.py" "$JOBS" --work "$WORK" --budget 100000 2>&1)
-  echo "$OUT" | grep -E "FINAL|STOP|cut ok|!!!|FAIL|стан:|QC"
+  echo "$OUT" | grep -E "FINAL|STOP|cut ok|!!!|FAIL|state:|QC"
   echo "$OUT" | grep -q "ALL DONE" && { echo "ALL DONE"; break; }
   echo "$OUT" | grep -q "STOP" || sleep 2
 done

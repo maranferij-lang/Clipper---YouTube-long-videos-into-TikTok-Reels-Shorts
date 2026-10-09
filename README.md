@@ -18,8 +18,6 @@ Setup on macOS
 Third party pieces you install separately: ffmpeg, yt-dlp, PyTorch, OpenCV, Light-ASD (Junhua-Liao/Light-ASD) and the YuNet model from OpenCV Zoo. Check their own licences.
 
 Notes
-Code comments are mostly in Ukrainian. Only use it on video you have the right to repost.
-
-Коротко українською: система нарізки довгих відео на вертикальні кліпи з відбором моментів за рубрикою, камерою на активному мовці й перевіркою якості. Інструкція запуску вище.
+Code comments are in English. The scoring lexicons in opus_scorer_v22.py target Ukrainian speech (plus some Russian). Only use it on video you have the right to repost.
 
 License: MIT

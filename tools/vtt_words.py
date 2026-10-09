@@ -31,4 +31,4 @@ for wd in words:
         if tags[k2][0]>last and nm(tags[k2][1])==n0: f=tags[k2][0]; j=k2+1; break
     wd[0]=f if f is not None else max(wd[0],last+0.05); last=wd[0]
 json.dump([{'t':round(t,2),'w':w} for t,w in words],open(sys.argv[2],'w'),ensure_ascii=False)
-print('слів',len(words),'до',round(words[-1][0]),'с')
+print('words',len(words),'up to',round(words[-1][0]),'s')
